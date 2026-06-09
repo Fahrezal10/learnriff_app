@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "697899159013",
+    "project_id": "learnriff-cb34f",
+    "storage_bucket": "learnriff-cb34f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:697899159013:android:470f015942295612d9330c",
+        "android_client_info": {
+          "package_name": "com.example.learnriff"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDIxegwfyy7GkOgshCmviuCSvo_ZfoQsmM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
