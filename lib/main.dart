@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart'; // Tambahan Firebase
 import 'providers/auth_provider.dart';
 import 'screens/splash_screen.dart'; // Halaman awal diganti Splash
+import 'providers/tracker_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +15,7 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => TrackerProvider()), // Tambahkan baris ini
       ],
       child: const LearnRiffApp(),
     ),
