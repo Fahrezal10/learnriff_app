@@ -1,3 +1,4 @@
+import 'dart:async'; // Tambahan buat Timer otomatis
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
@@ -12,24 +13,34 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  Timer? _liveClockTimer; // Timer buat maksa UI cek jam secara realtime
+
   @override
   void initState() {
     super.initState();
-    // Memanggil operasi READ saat halaman pertama kali dibuka
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = Provider.of<AuthProvider>(context, listen: false);
       Provider.of<TrackerProvider>(context, listen: false).fetchSchedules(auth.token);
     });
+
+    // PENTING: Tiap 10 detik, suruh UI cek ulang apakah jam target sudah tiba
+    _liveClockTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (mounted) {
+        setState(() {}); // Paksa rebuild ringan untuk update status denyut card
+      }
+    });
   }
 
-  // ==========================================
-  // OPERASI CREATE: Dialog Form Tambah Jadwal
-  // ==========================================
+  @override
+  void dispose() {
+    _liveClockTimer?.cancel(); // Matikan timer saat keluar halaman biar gak bocor
+    super.dispose();
+  }
+
   void _showAddDialog() {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final tracker = Provider.of<TrackerProvider>(context, listen: false);
     
-    // Default pilihan
     int selectedModuleId = 1;
     TimeOfDay selectedTime = TimeOfDay.now();
 
@@ -83,19 +94,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () async {
-                    // Format waktu ke string HH:MM:00 untuk MySQL
                     final timeString = '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}:00';
+                    Navigator.pop(context); 
                     
-                    Navigator.pop(context); // Tutup dialog
-                    
-                    // Eksekusi API Create
-                    // Eksekusi API Create
                     final success = await tracker.addSchedule(auth.token, selectedModuleId, timeString);
                     if (mounted) {
                       if (success) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Jadwal ditambahkan!')));
                       } else {
-                        // INI ERROR HANDLING-NYA
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('Gagal menyimpan jadwal. Cek koneksi server.'),
                           backgroundColor: Colors.red,
@@ -114,16 +120,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ==========================================
-  // OPERASI UPDATE (FORM): Dialog Form Edit Jadwal
-  // ==========================================
   void _showEditDialog(BuildContext context, int id, int currentModuleId, String currentTime) {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final tracker = Provider.of<TrackerProvider>(context, listen: false);
     
     int selectedModuleId = currentModuleId;
-    
-    // Parsing string "HH:MM:SS" ke TimeOfDay
     List<String> timeParts = currentTime.split(':');
     TimeOfDay selectedTime = TimeOfDay(hour: int.parse(timeParts[0]), minute: int.parse(timeParts[1]));
 
@@ -180,14 +181,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     final timeString = '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}:00';
                     Navigator.pop(context); 
                     
-                    // Eksekusi API Edit
-                    // Eksekusi API Edit
                     final success = await tracker.editSchedule(auth.token, id, selectedModuleId, timeString);
                     if (mounted) {
                       if (success) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Jadwal diperbarui!')));
                       } else {
-                        // INI ERROR HANDLING-NYA
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('Gagal memperbarui jadwal. Cek koneksi server.'),
                           backgroundColor: Colors.red,
@@ -227,9 +225,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      // ==========================================
-      // OPERASI READ: Menampilkan Daftar (Consumer)
-      // ==========================================
       body: Consumer<TrackerProvider>(
         builder: (context, tracker, child) {
           if (tracker.isLoading) {
@@ -248,93 +243,107 @@ class _HomeScreenState extends State<HomeScreen> {
             itemBuilder: (context, index) {
               final schedule = tracker.schedules[index];
               
-              return Card(
-                color: const Color(0xFF1E1E1E),
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(
-                  side: BorderSide(
-                    color: schedule.isCompleted ? Colors.green.withOpacity(0.5) : Colors.transparent,
-                    width: 2
-                  ),
-                  borderRadius: BorderRadius.circular(8)
-                ),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  // ==========================================
-                  // OPERASI UPDATE: Checkbox Status
-                  // ==========================================
-                  leading: Checkbox(
-                    value: schedule.isCompleted,
-                    activeColor: Colors.green,
-                    checkColor: Colors.black,
-                    onChanged: (bool? newValue) async {
-                      if (newValue != null) {
-                        await tracker.updateStatus(auth.token, schedule.id, newValue);
-                      }
-                    },
-                  ),
-                  title: Text(
-                    schedule.moduleTitle ?? 'Materi Tidak Diketahui',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      decoration: schedule.isCompleted ? TextDecoration.lineThrough : null,
-                      color: schedule.isCompleted ? Colors.grey : Colors.white,
+              // LOGIKA LIVE CHECKER
+              bool isTimeArrived = false;
+              try {
+                List<String> timeParts = schedule.scheduleTime!.split(':');
+                int scheduleHour = int.parse(timeParts[0]);
+                int scheduleMinute = int.parse(timeParts[1]);
+                
+                DateTime now = DateTime.now();
+                
+                if (now.hour > scheduleHour) {
+                  isTimeArrived = true;
+                } else if (now.hour == scheduleHour && now.minute >= scheduleMinute) {
+                  isTimeArrived = true;
+                }
+              } catch (e) {
+                isTimeArrived = false;
+              }
+
+              return PulsatingCard(
+                isTimeArrived: isTimeArrived,
+                isCompleted: schedule.isCompleted,
+                child: Card(
+                  color: const Color(0xFF1E1E1E),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  shape: RoundedRectangleBorder(
+                    side: BorderSide(
+                      color: schedule.isCompleted ? Colors.green.withOpacity(0.5) : Colors.transparent,
+                      width: 2
                     ),
+                    borderRadius: BorderRadius.circular(8)
                   ),
-                  subtitle: Text(
-                    'Waktu: ${schedule.scheduleTime}',
-                    style: const TextStyle(color: Colors.grey),
-                  ),
-                  // ==========================================
-                  // OPERASI UPDATE & DELETE (Ikon Pensil & Sampah)
-                  // ==========================================
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Tombol Edit
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.blueAccent),
-                        onPressed: () {
-                          _showEditDialog(context, schedule.id, schedule.moduleId, schedule.scheduleTime);
-                        },
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    leading: Checkbox(
+                      value: schedule.isCompleted,
+                      activeColor: Colors.green,
+                      checkColor: Colors.black,
+                      onChanged: (bool? newValue) async {
+                        if (newValue != null) {
+                          await tracker.updateStatus(auth.token, schedule.id, newValue);
+                        }
+                      },
+                    ),
+                    title: Text(
+                      schedule.moduleTitle ?? 'Materi Tidak Diketahui',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        decoration: schedule.isCompleted ? TextDecoration.lineThrough : null,
+                        color: schedule.isCompleted ? Colors.grey : Colors.white,
                       ),
-                      // Tombol Hapus
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                        onPressed: () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              backgroundColor: const Color(0xFF1E1E1E),
-                              title: const Text('Hapus Jadwal?', style: TextStyle(color: Colors.white)),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.pop(ctx, true),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                  child: const Text('Hapus', style: TextStyle(color: Colors.white)),
-                                ),
-                              ],
-                            )
-                          );
-                          
-                          if (confirm == true) {
-                            final success = await tracker.deleteSchedule(auth.token, schedule.id);
-                            if (mounted) {
-                              if (success) {
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Jadwal dihapus.')));
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                  content: Text('Gagal menghapus. Cek koneksi server.'),
-                                  backgroundColor: Colors.red,
-                                ));
+                    ),
+                    subtitle: Text(
+                      'Waktu: ${schedule.scheduleTime}',
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.blueAccent),
+                          onPressed: () {
+                            _showEditDialog(context, schedule.id, schedule.moduleId, schedule.scheduleTime!);
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                          onPressed: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                backgroundColor: const Color(0xFF1E1E1E),
+                                title: const Text('Hapus Jadwal?', style: TextStyle(color: Colors.white)),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+                                  ElevatedButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                    child: const Text('Hapus', style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
+                              )
+                            );
+                            
+                            if (confirm == true) {
+                              final success = await tracker.deleteSchedule(auth.token, schedule.id);
+                              if (mounted) {
+                                if (success) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Jadwal dihapus.')));
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                    content: Text('Gagal menghapus. Cek koneksi server.'),
+                                    backgroundColor: Colors.red,
+                                  ));
+                                }
                               }
                             }
-                          }
-                        },
-                      ),
-                    ],
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -347,6 +356,88 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: const Color(0xFF8A0303),
         child: const Icon(Icons.add, color: Colors.white),
       ),
+    );
+  }
+}
+
+class PulsatingCard extends StatefulWidget {
+  final Widget child;
+  final bool isTimeArrived;
+  final bool isCompleted;
+
+  const PulsatingCard({
+    super.key,
+    required this.child,
+    required this.isTimeArrived,
+    required this.isCompleted,
+  });
+
+  @override
+  State<PulsatingCard> createState() => _PulsatingCardState();
+}
+
+class _PulsatingCardState extends State<PulsatingCard> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _glowAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000), 
+    );
+
+    _glowAnimation = Tween<double>(begin: 0.0, end: 12.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+
+    _checkAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant PulsatingCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _checkAnimation();
+  }
+
+  void _checkAnimation() {
+    if (widget.isTimeArrived && !widget.isCompleted) {
+      if (!_controller.isAnimating) {
+        _controller.repeat(reverse: true);
+      }
+    } else {
+      _controller.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _glowAnimation,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              if (widget.isTimeArrived && !widget.isCompleted)
+                BoxShadow(
+                  color: const Color(0xFF8A0303).withOpacity(0.8), 
+                  blurRadius: _glowAnimation.value * 1.5,
+                  spreadRadius: _glowAnimation.value / 1.5,
+                ),
+            ],
+          ),
+          child: widget.child,
+        );
+      },
+      child: widget.child,
     );
   }
 }
